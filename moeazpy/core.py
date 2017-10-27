@@ -46,11 +46,11 @@ def make_message(message_type, originator, content):
 
 class MessageHandler:
     def __call__(self, msg):
-        logger.debug('Handling message ...')
         decoded_msg = msg[-1].decode('utf-8')
         decoded_msg = json.loads(decoded_msg)
 
         msg_type = decoded_msg['type']
+        logger.debug('Handling message type: "{}"'.format(msg_type))
 
         if msg_type.startswith('_'):
             raise ValueError('Invalid message type. Message type starts with a "_".')
@@ -72,8 +72,13 @@ class ReplyMessageHandler(MessageHandler):
     def __init__(self, stream):
         self.stream = stream
 
-    def _send(self, message_type, originator, content):
-        self.stream.send_json(make_message(message_type, originator, content))
+    def _reply(self, reply):
+
+        # TODO fix originator
+        msg = reply.make_message()
+        msg = json.dumps(msg).encode('utf-8')
+
+        self.stream.send(msg)
 
 
 class Message:
@@ -127,3 +132,17 @@ class ReplyMessage(Message):
     @property
     def message_type(self):
         return '{}.{}'.format(self.request_message['type'], 'reply')
+
+
+class OKReply(ReplyMessage):
+    def make_message_content(self):
+        return {
+            'status': 'OK'
+        }
+
+
+class ErrorReply(ReplyMessage):
+    def make_message_content(self):
+        return {
+            'status': 'error'
+        }

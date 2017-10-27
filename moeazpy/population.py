@@ -1,6 +1,6 @@
 from zmq.eventloop import ioloop, zmqstream
 import zmq
-from .core import ZmqServer, ReplyMessageHandler, ReplyMessage
+from .core import ZmqServer, ReplyMessageHandler, ReplyMessage, OKReply, ErrorReply
 from random import Random
 import uuid
 import json
@@ -203,8 +203,22 @@ class PopulationMessageHandler(ReplyMessageHandler):
 
         self._reply(sender, reply)
 
+    def insert_child(self, *args):
+        """ Request for a new child to be inserted in to the population """
+        #sender, empty, msg = args
+        #assert empty == b''
+        msg = args[-1]
 
+        content = msg['content']  # content isn't used for this message
+        try:
+            child = content['child']
+        except KeyError:
+            reply = ErrorReply(self, msg)
+        else:
+            self.population.insert_child(child)
+            reply = OKReply(self, msg)
 
+        self._reply(reply)
 
 
 class PopulationServer(ZmqServer):

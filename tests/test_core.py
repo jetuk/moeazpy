@@ -41,3 +41,5 @@ class TestZmqServer:
         zs.stop()
 
         assert zs.loop.stop.call_count == 1
+
+

@@ -1,0 +1,40 @@
+{
+  "name": "moeazpy",
+  "version": "1.0",
+  "header": [
+    {"name": "empty", "value": ""},
+    {"name": "protocol_name" },
+    {"name": "protocol_version" },
+    {"name": "type"}
+  ],
+  "requests": {
+    "connect": {},
+    "disconnect": {},
+    "ping": {},
+    "request_service": {
+      "fields": {
+        "service_name": {},
+        "args": {"optional": true},
+        "kwargs": {"optional": true}
+      }
+    },
+    "request_service_status": {},
+    "register_service": {
+      "fields": {
+        "service_name": {},
+        "args": {"optional": true},
+        "kwargs": {"optional": true}
+      }
+    },
+    "work_request": {}
+  },
+  "replies": {
+    "error": {},
+    "success": {},
+    "request_success": {
+      "fields": {
+        "uid": {}
+      }
+    }
+  }
+}

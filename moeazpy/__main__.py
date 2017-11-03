@@ -3,9 +3,26 @@ from .propagator import Propagator, PropagatorServer
 from .broker import Broker, BrokerServer
 from .worker import Worker, WorkerServer
 import threading
-import logging
+import click
 
+import logging
 logger = logging.getLogger('moeazpy')
+
+
+@click.group()
+def cli():
+    pass
+
+
+@cli.command()
+def start_server():
+    logging.basicConfig(level=logging.DEBUG)
+
+    from .core import ZmqServer
+
+    server = ZmqServer()
+    server.setup('moeazpy.frontend')
+    server.start()
 
 
 def start_population_server():

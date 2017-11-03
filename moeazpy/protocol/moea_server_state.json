@@ -1,0 +1,38 @@
+{
+  "start": {
+    "connect": {
+      "action": "register_client",
+      "type": "client",
+      "next": "registering"
+    }
+  },
+  "registering": {
+    "success": {
+      "action": "reply",
+      "message": "success",
+      "type": "internal",
+      "next": "ready"
+    },
+    "error": {
+      "action": "reply",
+      "message": "error",
+      "type": "internal",
+      "next": "start"
+    }
+  },
+  "ready": {
+    "request_service": {
+      "action": "request_service",
+      "type": "client"
+    },
+    "register_service": {
+      "action": "register_service",
+      "type": "client"
+    },
+    "disconnect": {
+      "action": "unregister_client",
+      "type": "client",
+      "next": "start"
+    }
+  }
+}

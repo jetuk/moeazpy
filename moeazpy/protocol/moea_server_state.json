@@ -29,6 +29,18 @@
       "action": "register_service",
       "type": "client"
     },
+    "request_service_status": {
+      "action": "request_service_status",
+      "type": "client"
+    },
+    "request_task": {
+      "action": "request_task",
+      "type": "client"
+    },
+    "task_complete": {
+      "action": "task_complete",
+      "type": "client"
+    },
     "disconnect": {
       "action": "unregister_client",
       "type": "client",

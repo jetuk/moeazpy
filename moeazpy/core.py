@@ -25,15 +25,34 @@ class ClientServiceManager:
     def name(self):
         return self._name
 
+    @property
+    def queued_requests(self):
+        for req in self.requests.values():
+            if req.status == 'queueing':
+                yield req
+
+    def sorted_queued_requests(self):
+        return sorted(self.queued_requests, key=lambda req: req.creation_time)
+
+    def next_queued_request(self):
+        for req in self.sorted_queued_requests():
+            return req
+
     def add_service_request(self, client, args=None, kwargs=None):
         """ Add a new service request to the manager from client """
-        req = ClientServiceRequest(client, args=args, kwargs=kwargs)
+        req = ClientServiceRequest(self, client, args=args, kwargs=kwargs)
         self.requests[req.uid] = req
         return req
 
+    def get_service_request_status(self, uid):
+        """ Return the status of a service request """
+        req = self.requests[uid]
+        return req.status
+
 
 class ClientServiceRequest:
-    def __init__(self, client, args=None, kwargs=None, creation_time=None, worker=None):
+    def __init__(self, manager, client, args=None, kwargs=None, creation_time=None, worker=None):
+        self.manager = manager
         self.client = client
         self.worker = worker
         self.args = args
@@ -152,7 +171,6 @@ class ZmqServer:
             reply = self.protocol.build_reply('error')
 
         # Now reply to the client
-        print(self.frontend, [client, empty, reply])
         self.frontend.send_multipart([client, empty, reply])
 
     def register_client_service(self, client, service_name):
@@ -171,6 +189,40 @@ class ZmqServer:
         # Create a new service request
         service_request = service_manager.add_service_request(client, args=args, kwargs=kwargs)
         return service_request
+
+    def request_client_service_status(self, client, service_name, uid):
+        """ Return the status for a given request uid """
+        service_manager = self._ensure_client_service_manager(service_name)
+        # TODO any client can request the status of any request
+        return service_manager.get_service_request_status(uid)
+
+    def dispatch_client_task(self, client):
+        """ Find a task for a client to undertake """
+
+        for service_name, service_manager in self._client_service_managers.items():
+            if not client in service_manager.clients:
+                # Only find work for services the client is registered to perform
+                continue
+
+            req = service_manager.next_queued_request()
+            if req is not None:
+                # This client, requesting a task, is going to be the worker for this task
+                req.worker = client
+                req.dispatch_time = time.time()
+                return req
+
+    def complete_task(self, uid):
+        """ Register a task as complete """
+        for service_manager in self._client_service_managers.values():
+            try:
+                req = service_manager.requests[uid]
+            except KeyError:
+                continue
+            req.complete_time = time.time()
+            return
+
+        raise ValueError('Request with UID "{}" not found.'.format(uid))
+
 
 
 

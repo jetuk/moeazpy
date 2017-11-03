@@ -22,6 +22,13 @@ def simple_server(mocker):
     return zs
 
 
+def assert_message_call_args(func, sender, expected_message):
+    frames = func.call_args[0][0]
+    assert frames[0] == sender
+    assert frames[1] == b''
+    assert frames[2] == expected_message
+
+
 class TestZmqServer:
     """ Test :class:`ZmqServer` base class"""
 
@@ -41,9 +48,6 @@ class TestZmqServer:
 
         protocol = simple_server.protocol
         connect_msg = protocol.build_request('connect')
-
-        # re-setup the server with the patched ZMQStream
-        simple_server.setup('moeazpy.test')
 
         # Fake a message from a client
         simple_server._handle_message([b'client1', b'', connect_msg])
@@ -92,23 +96,19 @@ class TestZmqServer:
         s._handle_message([b'worker1', b'', connect_msg])
 
         # Now register a service
-        register_service_msg = protocol.build_request('register_service',
-                                                      data={
-                                                          'service_name': 'the-best-service',
-                                                          'args': (), 'kwargs': {},
-                                                      })
+        register_service_msg = protocol.build_request('register_service', data={
+            'service_name': 'the-best-service', 'args': (), 'kwargs': {},
+        })
         s._handle_message([b'worker1', b'', register_service_msg])
 
         # Now check the service has been registered on the client
         service_manager = simple_server._client_service_managers['the-best-service']
         assert b'worker1' in service_manager.clients
 
-        # Now let's try to use the service from client1
-        request_service_msg = protocol.build_request('request_service',
-                                                     data={
-                                                         'service_name': 'the-best-service',
-                                                     })
-
+        # Now lets try to use the service from client1
+        request_service_msg = protocol.build_request('request_service', data={
+            'service_name': 'the-best-service',
+        })
         s._handle_message([b'client1', b'', request_service_msg])
 
         # There should now be a single request
@@ -120,7 +120,51 @@ class TestZmqServer:
             assert req_uid == req.uid
             # Reply from server should include the generate UID for the request
             expected_reply = protocol.build_reply('request_success', data={'uid': req_uid})
-            assert simple_server.frontend.send_multipart.call_args == (([b'client1', b'', expected_reply],), {})
+            assert_message_call_args(s.frontend.send_multipart, b'client1', expected_reply)
+
+        # Now lets try to get status update about our new request
+        request_service_status_msg = protocol.build_request('request_service_status', data={
+            'service_name': 'the-best-service', 'uid': req.uid
+        })
+
+        s._handle_message([b'client1', b'', request_service_status_msg])
+
+        # This request should be queueing because no workers have asked for any work yet.
+        expected_reply = protocol.build_reply('request_status', data={'uid': req_uid, 'status': 'queueing'})
+        assert_message_call_args(s.frontend.send_multipart, b'client1', expected_reply)
+
+        # Worker now asks for any work
+        request_work = protocol.build_request('request_task')
+        s._handle_message([b'worker1', b'', request_work])
+
+        # We expect the server to return a job to complete the previously add request
+        expected_reply = protocol.build_reply('new_task', data={
+            'service_name': 'the-best-service', 'uid': req_uid, 'args': [], 'kwargs': {},
+        })
+
+        assert_message_call_args(s.frontend.send_multipart, b'worker1', expected_reply)
+        # The request should now be assigned to the worker ...
+        assert req.worker == b'worker1'
+        # .. and not in the queue
+        assert len(list(service_manager.queued_requests)) == 0
+
+        # Client now requests a status update again ...
+        s._handle_message([b'client1', b'', request_service_status_msg])
+        # ... the request should now be running
+        expected_reply = protocol.build_reply('request_status', data={'uid': req_uid, 'status': 'running'})
+        assert_message_call_args(s.frontend.send_multipart, b'client1', expected_reply)
+
+        # Worker now completes the task
+        request_task_complete = protocol.build_request('task_complete', data={
+            'uid': req_uid
+        })
+        s._handle_message([b'worker1', b'', request_task_complete])
+
+        expected_reply = protocol.build_reply('success')
+        assert_message_call_args(s.frontend.send_multipart, b'worker1', expected_reply)
+
+
+
 
 
 

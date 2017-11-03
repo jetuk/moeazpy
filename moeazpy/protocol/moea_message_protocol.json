@@ -18,7 +18,12 @@
         "kwargs": {"optional": true}
       }
     },
-    "request_service_status": {},
+    "request_service_status": {
+      "fields": {
+        "service_name": {},
+        "uid": {}
+      }
+    },
     "register_service": {
       "fields": {
         "service_name": {},
@@ -26,7 +31,12 @@
         "kwargs": {"optional": true}
       }
     },
-    "work_request": {}
+    "request_task": {},
+    "task_complete": {
+      "fields": {
+        "uid": {}
+      }
+    }
   },
   "replies": {
     "error": {},
@@ -35,6 +45,21 @@
       "fields": {
         "uid": {}
       }
-    }
+    },
+    "request_status": {
+      "fields": {
+        "uid": {},
+        "status": {}
+      }
+    },
+    "new_task": {
+      "fields": {
+        "service_name": {},
+        "uid": {},
+        "args": {"optional": true},
+        "kwargs": {"optional": true}
+      }
+    },
+    "no_task" : {}
   }
 }

@@ -130,8 +130,35 @@ class MoeaServerStateMachine(ServerStateMachine):
 
         self.reply('request_success', data={'uid': req.uid})
 
+    def request_service_status(self):
+        """ Request the status of a previously issue service request """
+        msg = self.current_request_body
+        uid = msg['uid']
+        status = self.server.request_client_service_status(self.client, msg['service_name'], uid)
 
+        self.reply('request_status', data={'uid': uid, 'status': status})
 
+    def request_task(self):
+        """ Request a new task for this client """
+        task = self.server.dispatch_client_task(self.client)
 
+        if task is None:
+            # There is no new work!
+            self.reply('no_task')
+        else:
+            self.reply('new_task', data={
+                'service_name': task.manager.name,
+                'uid': task.uid,
+                'args': task.args,
+                'kwargs': task.kwargs,
+            })
+
+    def task_complete(self):
+        """ Successfully complete a task """
+        msg = self.current_request_body
+
+        uid = msg['uid']
+        self.server.complete_task(uid)
+        self.reply('success')
 
 

@@ -53,7 +53,7 @@ def test_simple_state_machine(simple_state_definition, simple_message_protocol):
 @pytest.fixture()
 def moea_sm():
     # TODO mock the server here instead of using `None`
-    return MoeaServerStateMachine(None, MoeaMessageProtocol())
+    return MoeaServerStateMachine(None, 'a-client', MoeaMessageProtocol())
 
 
 class TestMoeaServerStateMachine:

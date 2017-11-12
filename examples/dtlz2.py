@@ -50,7 +50,8 @@ class DTLZ2Worker(Worker):
 
 
 if __name__ == '__main__':
-    from moeazpy.population import PopulationServer, Population
+    from moeazpy.population import PopulationServer
+    from moeazpy.clients.population import Population
     from moeazpy.propagator import Propagator, PropagatorServer
     from moeazpy.broker import Broker, BrokerServer
     from moeazpy.worker import WorkerServer

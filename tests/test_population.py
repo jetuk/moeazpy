@@ -4,7 +4,7 @@ Tests for moeazpy.Population
 """
 import pytest
 
-from moeazpy.population import Population, InsufficientPopulationEntries, UniqueIDAlreadyExists
+from moeazpy.clients.population import InsufficientPopulationEntries, UniqueIDAlreadyExists, Population
 
 
 @pytest.fixture()

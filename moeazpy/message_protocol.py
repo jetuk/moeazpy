@@ -32,7 +32,7 @@ class MessageProtocol:
         """ Check the frames of a message correspond to this protocol. """
         for i, (header, frame) in enumerate(zip(self.headers, msg)):
             if header['name'] == 'empty':
-                if frame != b'':
+                if frame != '':
                     raise ValueError('Frame {:d} is not empty!')
             elif header['name'] == 'protocol_name':
                 # Check msg is from this protocol
@@ -61,7 +61,7 @@ class MessageProtocol:
         if validate:
             self.validate_message(msg)
 
-        return json.loads(msg[-1].decode('utf-8'))
+        return json.loads(msg[-1])
 
     def _build_header(self, message_type):
         """ Create a generic message header on this protocol """
@@ -69,7 +69,7 @@ class MessageProtocol:
 
         for i, header in enumerate(self.headers):
             if header['name'] == 'empty':
-                msg.append(b'')
+                msg.append('')
             elif header['name'] == 'protocol_name':
                 msg.append(self.name)
             elif header['name'] == 'protocol_version':
@@ -81,15 +81,18 @@ class MessageProtocol:
 
         return msg
 
-    def build_reply(self, message_type, data=None):
+    def build_reply(self, message_type, data=None, encode=True):
         """ Create a reply message based on this protocol """
-        return self._build_message(message_type, self.replies, data=data)
+        return self._build_message(message_type, self.replies, data=data, encode=encode)
 
-    def build_request(self, message_type, data=None):
+    def build_request(self, message_type, data=None, encode=True):
         """ Create a request message based on this protocol """
-        return self._build_message(message_type, self.requests, data=data)
+        return self._build_message(message_type, self.requests, data=data, encode=encode)
 
-    def _build_message(self, message_type, definitions, data=None, ):
+    def encode_message(self, message):
+        return json.dumps(message).encode('utf-8')
+
+    def _build_message(self, message_type, definitions, data=None, encode=True):
         """ Helper method to build a generic message from a given dict of definitions """
 
         # Fetch the message definition for this message type
@@ -120,8 +123,11 @@ class MessageProtocol:
                 raise ValueError('Data provided for field "{}", but this field is not required for message type "{}".'.format(k, message_type))
 
         # Now build the message using JSON serialisation and encode
-        msg.append(json.dumps(data).encode('utf-8'))
-        return msg
+        msg.append(json.dumps(data))
+        if encode:
+            return self.encode_message(msg)
+        else:
+            return msg
 
 
 

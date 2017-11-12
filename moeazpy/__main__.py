@@ -1,4 +1,5 @@
-from .population import PopulationServer, Population
+from .population import PopulationServer
+from moeazpy.clients.population import Population
 from .propagator import Propagator, PropagatorServer
 from .broker import Broker, BrokerServer
 from .worker import Worker, WorkerServer

@@ -36,6 +36,11 @@
       "fields": {
         "uid": {}
       }
+    },
+    "task_update": {
+      "fields": {
+        "uid": {}
+      }
     }
   },
   "replies": {

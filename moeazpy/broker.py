@@ -7,6 +7,7 @@ import time
 import uuid
 from collections import defaultdict
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -15,20 +16,25 @@ class ForwardedRequest(Request):
     pass
 
 
-
-
 class NoRegisteredWorkers(RuntimeError):
+    pass
+
+
+class NoServicesFoundError(RuntimeError):
     pass
 
 
 class NoFreeWorkers(RuntimeError):
     pass
 
+
 class NoPendingServiceRequests(RuntimeError):
     pass
 
+
 class WorkerNotRegistered(RuntimeError):
     pass
+
 
 class WorkerRegistrationError(RuntimeError):
     pass
@@ -69,14 +75,39 @@ class BrokerNoPendingServiceRequestsReply(BrokerReply):
 
 
 class BrokerTaskReply(BrokerReply):
-    def __init__(self, broker, request_message, task, *args, **kwargs):
+    def __init__(self, broker, request_message, service_request, *args, **kwargs):
         super().__init__(broker, request_message, *args, **kwargs)
-        self.task = task
+        self.service_request = service_request
+
+    def make_message_content(self):
+        return dict(status='new task', **self.service_request.make_message_content())
+
+
+class BrokerServiceRequest:
+    def __init__(self, client, name, attributes, args=None, kwargs=None, start_time=None):
+        self.client = client
+        self.name = name
+        self.attributes = attributes
+        self.args = args
+        self.kwargs = kwargs
+
+        if start_time is None:
+            start_time = time.time()
+        self.start_time = start_time
+
+        self.uid = uuid.uuid4().hex
+
+    @property
+    def is_timed_out(self):
+        return (time.time() - self.start_time) > self.timeout
 
     def make_message_content(self):
         return {
-            'status': 'new task',
-            'task': self.task
+            'service_name': self.name,
+            'service_attributes': self.attributes,
+            'service_args': self.args,
+            'service_kwargs': self.kwargs,
+            'uid': self.uid
         }
 
 
@@ -87,6 +118,7 @@ class BrokerService:
         self._registered_workers = set()
         self.waiting_service_requests = []
         self.pending_service_requests = []
+        self.complete_service_requests = []
 
     def register_worker(self, worker_id):
         self._registered_workers.add(worker_id)
@@ -101,9 +133,15 @@ class BrokerService:
     def available_workers(self):
         return self._registered_workers.intersection(self.broker._free_workers)
 
-    def append_service_request(self, client, request_contents):
-        # TODO include request UID in here. This should make its way to and back from the worker also
-        self.waiting_service_requests.append({'client': client, 'contents': request_contents})
+    def append_service_request(self, client, attributes, args=None, kwargs=None):
+
+        if args is None:
+            args = []
+        if kwargs is None:
+            kwargs = {}
+
+        service_request = BrokerServiceRequest(client, self.name, attributes, args=args, kwargs=kwargs)
+        self.waiting_service_requests.append(service_request)
 
     def find_worker_task(self, worker_id):
 
@@ -120,6 +158,9 @@ class BrokerService:
             # Register as a pending request
             self.pending_service_requests.append(req)
         return req
+
+    def complete_task(self):
+        pass
 
 
 
@@ -144,6 +185,14 @@ class Broker:
             self.services[service_name] = s
             logger.info('Created new service: "{}"'.format(service_name))
         return s
+
+    def find_services(self, service_name):
+        """ Find existing services using regex pattern matching.
+
+        """
+        for name in self.services:
+            if re.match(service_name, name):
+                yield name
 
     def register_worker(self, worker_id, services):
         """ Register a new worker """
@@ -174,15 +223,23 @@ class Broker:
         # Finally remove from broker
         self._registered_workers.remove(worker_id)
 
-    def request_service(self, client_id, service_name, request_contents):
+    def request_service(self, client_id, service_name, service_attributes, service_args=None, service_kwargs=None):
 
-        s = self.ensure_service(service_name)
+        # Match available services
+        feasible_services = list(s for s in self.find_services(service_name))
+
+        if len(feasible_services) == 0:
+            raise NoServicesFoundError('No registered services matching name: "{}"'.format(service_name))
+
+        # Pick one service at random
+        s = random.choice(feasible_services)
+        s = self.services[s]
 
         if len(s._registered_workers) == 0:
             raise NoRegisteredWorkers('No workers registered to provide this service: "{}"'.format(service_name))
 
         # register the service request
-        s.append_service_request(client_id, request_contents)
+        s.append_service_request(client_id, service_attributes, args=service_args, kwargs=service_kwargs)
 
     @property
     def waiting_service_requests(self):
@@ -240,10 +297,21 @@ class BrokerMessageHandler(MessageHandler):
     def request_service(self, *args):
         sender, empty, msg = args
         assert empty == b''
+        content = msg['content']
 
-        logger.info(msg)
+        service_name = content.get('service_name')
+        service_attributes = content.get('service_attributes', {})
+        service_args = content.get('service_args', [])
+        service_kwargs = content.get('service_kwargs', {})
 
-        self._reply(sender, BrokerOKReply(self, msg))
+        try:
+            self.broker.request_service(sender, service_name, service_attributes, service_args, service_kwargs)
+        except RuntimeError:
+            # TODO handle the expected exceptions better
+            logger.exception('Exception when processing service request: "{}""'.format(service_name))
+            self._reply(sender, BrokerErrorReply(self, msg))
+        else:
+            self._reply(sender, BrokerOKReply(self, msg))
 
     def worker_register(self, *args):
         """ Handle request to register a worker """
@@ -265,6 +333,7 @@ class BrokerMessageHandler(MessageHandler):
         try:
             # Find a task for this worker
             req = self.broker.find_worker_task(sender)
+            logger.info('Sending new task to worker: {}'.format(req))
             reply = BrokerTaskReply(self, msg, req)
         except WorkerNotRegistered:
             reply = BrokerWorkerNotRegisteredReply(self, msg)
@@ -281,25 +350,18 @@ class BrokerMessageHandler(MessageHandler):
 
         logger.info('Received update for task with status: "{}"'.format(content['status']))
         # Now send reply.
-        reply_content = {
-            'status': 'OK'
-        }
-
-        self._reply(sender, reply_content, msg['type'])
+        reply = BrokerOKReply(self, msg)
+        self._reply(sender, reply)
 
     def worker_task_finished(self, *args):
         sender, empty, msg = args
         assert empty == b''
-
         content = msg['content']
-
+        print(content)
         logger.info('Task finished with status: "{}"'.format(content['status']))
         # Now send reply.
-        reply_content = {
-            'status': 'OK'
-        }
-
-        self._reply(sender, reply_content, msg['type'])
+        reply = BrokerOKReply(self, msg)
+        self._reply(sender, reply)
 
 
 class BrokerServer(ZmqServer):

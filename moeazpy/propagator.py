@@ -30,12 +30,33 @@ class OperatorRequest(Request):
         }
 
 
+class EvaluationRequest(Request):
+    __message_type__ = 'request_service'
+
+    def __init__(self, timeout, population_uid, child_uid=None, **kwargs):
+        super().__init__(timeout, **kwargs)
+        self.population_uid = population_uid
+        self.child_uid = child_uid
+
+    def make_message_content(self):
+        return {
+            # TODO the propagator should be more specific about how its children are evaluated?
+            'service_name': 'evaluate.*',
+            'service_attributes': {
+                'child_uid': self.child_uid,
+                'population_uid': self.population_uid
+            }
+        }
+
+
+
 class Propagator:
     """
 
     """
-    def __init__(self, target_child_proportion=0.1):
+    def __init__(self, target_child_proportion=0.1, max_concurrent_child_evaluations=2):
         self.target_child_proportion = target_child_proportion
+        self.max_concurrent_child_evaluations = max_concurrent_child_evaluations
 
         self.population_status = {}
         self.requested_operations = defaultdict(dict)
@@ -60,7 +81,7 @@ class Propagator:
             current_evaluations = self.requested_evaluations[pop_id]
 
             capacity = info['capacity']
-            members = info['adults']
+            adults = info['adults']
             children = info['children']
 
             # Future size of the population is estimated as current size plus children, plus
@@ -69,11 +90,15 @@ class Propagator:
             # on the population. Not unreasonable for the time being, but might go a bit haywire if this
             # is not the case.
 
-            future_size = members + children + len(current_operations) + len(current_evaluations)
+            future_size = adults + children + len(current_operations) + len(current_evaluations)
 
             max_parents = None
             min_parents = 1
             children_to_generate = 0
+            children_to_evaluate = 0
+
+            if len(current_evaluations) < self.max_concurrent_child_evaluations:
+                children_to_evaluate = self.max_concurrent_child_evaluations - len(current_evaluations)
 
             if future_size < capacity:
                 # We estimate the future size to be less than the population capacity
@@ -81,7 +106,7 @@ class Propagator:
                 # Less any that already exists or are about to exist
                 children_to_generate = capacity - children - len(current_operations)
 
-                if members == 0:
+                if adults == 0:
                     # This is the beginning of the population.
                     # So lets use operators that can create children with no parents
                     max_parents = 0
@@ -96,6 +121,14 @@ class Propagator:
                 if future_children < expected_children:
                     # Not enough children; create some more
                     children_to_generate = expected_children - future_children
+
+            logger.info('Generating {} child evaluation requests for population: {}'.format(children_to_evaluate, pop_id))
+
+            for _ in range(children_to_evaluate):
+                # Create a request for each evaluation required
+                req = EvaluationRequest(5, pop_id, )
+                self.requested_evaluations[pop_id][req.uid] = req
+                yield req
 
             logger.info('Generating {} child operation requests for population: {}'.format(children_to_generate, pop_id))
 
@@ -193,8 +226,7 @@ class PropagatorServer(ZmqServer):
         self.propagator.check_request_timeouts()
 
         for req in self.propagator.generate_requests():
-            logger.debug('Sending request for operation on population: {}.'.format(req.population_uid))
-
+            logger.debug('Sending request on population: {}.'.format(req.population_uid))
             self.broker_connection.send_json(req.make_message())
 
         logger.debug('Tick complete!')

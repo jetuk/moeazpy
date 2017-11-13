@@ -48,6 +48,27 @@ class WorkerTaskFinishedRequest(WorkerRequest):
         }
 
 
+class WorkerInsertChildRequest(WorkerRequest):
+    __message_type__ = "insert_child"
+
+    def __init__(self, timeout, worker, child, **kwargs):
+        super().__init__(timeout, worker, **kwargs)
+        self.child = child
+
+    def make_message_content(self):
+        return {
+            'child': self.child
+        }
+
+
+class WorkerFetchChildRequest(WorkerRequest):
+    __message_type__ = "fetch_child"
+
+    def make_message_content(self):
+        return {}
+
+
+
 class WorkerClass(type):
     """ Metaclass for Worker which adds magic for registering services """
     def __new__(metacls, name, bases, namespace, **kwds):
@@ -68,8 +89,10 @@ class Worker(metaclass=WorkerClass):
         self.registered = False
         self.working = False
         self.thread = None
+        self.service_population_requests = []
 
-    def generate_request(self, ):
+    def generate_broker_request(self, ):
+        logger.debug('Generating worker request for broker ...')
 
         # If we're not registered then try to register.
         if not self.registered:
@@ -94,6 +117,7 @@ class Worker(metaclass=WorkerClass):
             return req
         else:
             # Worker thread has finished.
+            # TODO this hasn't guaranteed all the requests have been sent to the population
             logger.debug('Generating task finished request.')
             req = WorkerTaskFinishedRequest(5, self)
 
@@ -103,13 +127,23 @@ class Worker(metaclass=WorkerClass):
 
             return req
 
+    def generate_population_request(self, ):
+        """ Generate the next request for the population """
+        logger.debug('Generating worker request for population ...')
+        try:
+            req = self.service_population_requests.pop(0)
+        except IndexError:
+            # No requests
+            return None
+        return req
+
     def dispatch(self, service_name, args, kwargs):
         """  Dispatch a new service """
         self.working = True
 
         func = self._services[service_name]
         # Create the service Thread
-        thread = func(self, *args, **kwargs)
+        thread = Thread(target=func, args=[self]+args, kwargs=kwargs)
         logger.info('Starting worker thread: "{}"'.format(service_name))
         thread.start()
         self.thread = thread
@@ -117,22 +151,6 @@ class Worker(metaclass=WorkerClass):
     @property
     def services(self):
         return self._services.keys()
-
-    @service('operate.uniform_random')
-    def uniform_random(self):
-        import random
-        class MyThread(Thread):
-            def __init__(self, n, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-                self.n = n
-
-            def run(self):
-                for i in range(self.n):
-                    logger.info("MyThread is running and working hard!")
-                    time.sleep(1)
-
-        return MyThread(random.randint(1, 10))
-
 
 
 class WorkerMessageHandler(MessageHandler):
@@ -143,7 +161,7 @@ class WorkerMessageHandler(MessageHandler):
 
     def worker_register_reply(self, *args):
         # Current request has been replied to
-        self.server.current_request = None
+        self.server.current_broker_request = None
 
         msg = args[-1]
         content = msg['content']
@@ -155,16 +173,16 @@ class WorkerMessageHandler(MessageHandler):
             self.worker.registered = False
 
     def worker_ready_reply(self, *args):
-        self.server.current_request = None
+        self.server.current_broker_request = None
 
         msg = args[-1]
         content = msg['content']
+        print(content)
 
         # TODO make this constants
         if content['status'] == 'new task':
-            logger.info('New task received from broker for service: "{}"'.format(content['service']))
-            print(content)
-            self.worker.dispatch(content['service'], content['args'], content['kwargs'])
+            logger.info('New task received from broker for service: "{}"'.format(content['service_name']))
+            self.worker.dispatch(content['service_name'], content['service_args'], content['service_kwargs'])
         elif content['status'] == 'no tasks':
             logger.info('No work available from the broker.')
             self.worker.working = False
@@ -173,7 +191,7 @@ class WorkerMessageHandler(MessageHandler):
             self.worker.working = False
 
     def worker_task_update_reply(self, *args):
-        self.server.current_request = None
+        self.server.current_broker_request = None
 
         msg = args[-1]
         content = msg['content']
@@ -183,7 +201,7 @@ class WorkerMessageHandler(MessageHandler):
             logger.warning('Failed to update task with the broker: "{}"'.format(content['status']))
 
     def worker_task_finished_reply(self, *args):
-        self.server.current_request = None
+        self.server.current_broker_request = None
 
         msg = args[-1]
         content = msg['content']
@@ -194,6 +212,36 @@ class WorkerMessageHandler(MessageHandler):
             logger.warning('Failed to finish task with the broker: "{}"'.format(content['status']))
 
 
+class WorkerPopulationMessageHandler(MessageHandler):
+    def __init__(self, stream, worker, server):
+        self.stream = stream
+        self.worker = worker
+        self.server = server
+
+    def insert_child_reply(self, *args):
+        self.server.current_population_request = None
+
+        msg = args[-1]
+        content = msg['content']
+        if content['status'] == 'OK':
+            logger.info("Successfully insert child into population.")
+        else:
+            # TODO try to send finish request again?
+            logger.warning('Failed to insert child into the population: "{}"'.format(content['status']))
+
+    def fetch_child(self, *args):
+        req = self.server.current_population_request
+        self.server.current_population_request = None
+
+        msg = args[-1]
+        content = msg['content']
+        req.result = content
+        if content['status'] == 'OK':
+            logger.info("Successfully insert child into population.")
+        else:
+            # TODO try to send finish request again?
+            logger.warning('Failed to insert child into the population: "{}"'.format(content['status']))
+
 
 class WorkerServer(ZmqServer):
     def __init__(self, worker, ):
@@ -201,18 +249,27 @@ class WorkerServer(ZmqServer):
         self.worker = worker
 
         self.broker_connection = None
+        self.population_connection = None
         self.ticker = None
-        self.current_request = None
+        self.current_broker_request = None
+        self.current_population_request = None
 
     def setup(self, pop_server_address, broker_server_address):
         super().setup()
 
         # Connection to broker
         broker_connection = self.context.socket(zmq.REQ)
-        broker_connection.connect("ipc://{}".format(broker_server_address))
+        broker_connection.connect("ipc://{}.frontend".format(broker_server_address))
         logger.info('Connected to broker: {}'.format(broker_server_address))
         self.broker_connection = zmqstream.ZMQStream(broker_connection, self.loop)
         self.broker_connection.on_recv(WorkerMessageHandler(self.broker_connection, self.worker, self))
+
+        # Connection to population
+        pop_connection = self.context.socket(zmq.REQ)
+        pop_connection.connect("ipc://{}.frontend".format(pop_server_address))
+        logger.info('Connected to population: {}'.format(pop_server_address))
+        self.population_connection = zmqstream.ZMQStream(pop_connection, self.loop)
+        self.population_connection.on_recv(WorkerPopulationMessageHandler(self.population_connection, self.worker, self))
 
         # Setup tick callback
         self.ticker = ioloop.PeriodicCallback(self.tick, 1000, self.loop)
@@ -222,17 +279,35 @@ class WorkerServer(ZmqServer):
         super().start()
 
     def tick(self):
+        self._tick_broker()
+        self._tick_population()
 
+    def _tick_broker(self):
         # TODO check broker connection timeout
 
-        if self.current_request is not None:
+        if self.current_broker_request is not None:
             # Currently processing a request
             # TODO check timeout.
             return
 
-        req = self.worker.generate_request()
+        req = self.worker.generate_broker_request()
 
         if req is not None:
             logger.debug('Sending request to broker: "{}"'.format(req.__message_type__))
             self.broker_connection.send_json(req.make_message())
-            self.current_request = req
+            self.current_broker_request = req
+
+    def _tick_population(self):
+        # TODO check population connection timeout
+
+        if self.current_population_request is not None:
+            # Currently processing a request
+            # TODO check timeout.
+            return
+
+        req = self.worker.generate_population_request()
+
+        if req is not None:
+            logger.debug('Sending request to population: "{}"'.format(req.__message_type__))
+            self.population_connection.send_json(req.make_message())
+            self.current_population_request = req

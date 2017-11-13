@@ -1,0 +1,70 @@
+{
+  "name": "moeazpy",
+  "version": "1.0",
+  "header": [
+    {"name": "empty", "value": ""},
+    {"name": "protocol_name" },
+    {"name": "protocol_version" },
+    {"name": "type"}
+  ],
+  "requests": {
+    "connect": {},
+    "disconnect": {},
+    "ping": {},
+    "request_service": {
+      "fields": {
+        "service_name": {},
+        "args": {"optional": true},
+        "kwargs": {"optional": true}
+      }
+    },
+    "request_service_status": {
+      "fields": {
+        "service_name": {},
+        "uid": {}
+      }
+    },
+    "register_service": {
+      "fields": {
+        "service_name": {},
+        "args": {"optional": true},
+        "kwargs": {"optional": true}
+      }
+    },
+    "request_task": {},
+    "task_complete": {
+      "fields": {
+        "uid": {}
+      }
+    },
+    "task_update": {
+      "fields": {
+        "uid": {}
+      }
+    }
+  },
+  "replies": {
+    "error": {},
+    "success": {},
+    "request_success": {
+      "fields": {
+        "uid": {}
+      }
+    },
+    "request_status": {
+      "fields": {
+        "uid": {},
+        "status": {}
+      }
+    },
+    "new_task": {
+      "fields": {
+        "service_name": {},
+        "uid": {},
+        "args": {"optional": true},
+        "kwargs": {"optional": true}
+      }
+    },
+    "no_task" : {}
+  }
+}

@@ -10,11 +10,7 @@ setup(name='moeazpy',
       packages=['moeazpy', ],
       entry_points={
             'console_scripts': [
-                  'pop_server = moeazpy.__main__:start_population_server',
-                  'prop_server = moeazpy.__main__:start_propagator_server',
-                  'broker_server = moeazpy.__main__:start_broker_server',
-                  'worker_server = moeazpy.__main__:start_worker_server',
-                  'local_algorithm = moeazpy.__main__:start_local_algorithm',
+                  'moeazpy = moeazpy.__main__:cli',
             ]
       },
 )
